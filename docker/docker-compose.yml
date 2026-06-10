@@ -1,0 +1,42 @@
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: marlowe
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Uncomment for GPU support (NVIDIA):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  marlowe:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    depends_on:
+      - mongodb
+      - ollama
+    environment:
+      MARLOWE_MONGODB_URI: mongodb://mongodb:27017
+    volumes:
+      - ./reports:/app/reports
+
+volumes:
+  mongo_data:
+  ollama_data:
