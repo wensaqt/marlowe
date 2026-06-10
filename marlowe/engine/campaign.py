@@ -13,14 +13,17 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 import structlog
 
 from marlowe.analysis.detector import VulnerabilityDetector
-from marlowe.attacks.base import AttackContext
+from marlowe.attacks.base import AttackContext, BaseAttackPlugin
 from marlowe.core.exceptions import TargetUnreachableError
 from marlowe.core.models import (
+    AttackResult,
     Campaign,
+    CampaignConfig,
     CampaignStatus,
     Report,
     ReportSummary,
@@ -28,11 +31,18 @@ from marlowe.core.models import (
     Vulnerability,
 )
 from marlowe.core.registry import PluginRegistry
-from marlowe.engine.baseline import BaselineProfiler
+from marlowe.engine.baseline import BaselineProfile, BaselineProfiler
 from marlowe.engine.runner import AttackRunner
 from marlowe.targets.base import BaseTargetAdapter
 
 log = structlog.get_logger(__name__)
+
+
+class _PluginOutcome(NamedTuple):
+    """Holds the raw results and optional vulnerability for one plugin run."""
+
+    results: list[AttackResult]
+    vulnerability: Vulnerability | None
 
 
 class CampaignRunner:
@@ -47,61 +57,51 @@ class CampaignRunner:
         self._registry = registry
 
     async def run(self) -> Report:
+        """Execute the full campaign and return a completed Report."""
         cfg = self._campaign.config
         self._campaign.status = CampaignStatus.RUNNING
 
-        # 1. Health check
         if not await self._adapter.health_check():
             self._campaign.status = CampaignStatus.FAILED
-            raise TargetUnreachableError(
-                f"Target at {cfg.target.url} failed health check"
-            )
+            raise TargetUnreachableError(f"Target at {cfg.target.url} failed health check")
 
-        # 2. Baseline
-        profiler = BaselineProfiler(self._adapter)
-        profile = await profiler.run(n_benign=cfg.baseline_prompts)
-
-        # 3. Resolve plugins
-        plugin_ids = cfg.plugins or self._registry.all_ids()
-        plugins = [self._registry.get(pid) for pid in plugin_ids]
-
-        # 4. Run all plugins (concurrency controlled per-plugin via AttackRunner)
+        profile = await BaselineProfiler(self._adapter).run(n_benign=cfg.baseline_prompts)
+        plugins = self._resolve_plugins(cfg)
         detector = VulnerabilityDetector(profile)
-        vulnerabilities: list[Vulnerability] = []
-        total_attacks = 0
-        total_successes = 0
 
-        plugin_tasks = [
-            self._run_plugin(plugin, profile, detector, cfg)
-            for plugin in plugins
-        ]
-        plugin_results = await asyncio.gather(*plugin_tasks, return_exceptions=True)
+        outcomes = await self._run_all_plugins(plugins, profile, detector, cfg)
+        return self._build_report(outcomes)
 
-        for plugin, result in zip(plugins, plugin_results):
+    def _resolve_plugins(self, cfg: CampaignConfig) -> list[BaseAttackPlugin]:
+        """Return the plugins selected by the campaign config (all if none specified)."""
+        plugin_ids = cfg.plugins or self._registry.all_ids()
+        return [self._registry.get(pid) for pid in plugin_ids]
+
+    async def _run_all_plugins(
+        self,
+        plugins: list[BaseAttackPlugin],
+        profile: BaselineProfile,
+        detector: VulnerabilityDetector,
+        cfg: CampaignConfig,
+    ) -> list[_PluginOutcome]:
+        tasks = [self._run_plugin(plugin, profile, detector, cfg) for plugin in plugins]
+        raw = await asyncio.gather(*tasks, return_exceptions=True)
+
+        outcomes: list[_PluginOutcome] = []
+        for plugin, result in zip(plugins, raw, strict=True):
             if isinstance(result, Exception):
                 log.error("plugin crashed", plugin=plugin.plugin_id, error=str(result))
-                continue
-            results, vuln = result
-            total_attacks += len(results)
-            total_successes += sum(1 for r in results if r.vulnerability_detected)
-            if vuln:
-                vulnerabilities.append(vuln)
+            else:
+                outcomes.append(result)
+        return outcomes
 
-        # 5. Build report
-        self._campaign.status = CampaignStatus.COMPLETED
-        self._campaign.completed_at = datetime.now(UTC)
-        self._campaign.total_attacks = total_attacks
-        self._campaign.successful_attacks = total_successes
-        self._campaign.vulnerabilities_found = len(vulnerabilities)
-
-        summary = _build_summary(total_attacks, total_successes, vulnerabilities)
-        return Report(
-            campaign=self._campaign,
-            summary=summary,
-            vulnerabilities=vulnerabilities,
-        )
-
-    async def _run_plugin(self, plugin, profile, detector, cfg):
+    async def _run_plugin(
+        self,
+        plugin: BaseAttackPlugin,
+        profile: BaselineProfile,
+        detector: VulnerabilityDetector,
+        cfg: CampaignConfig,
+    ) -> _PluginOutcome:
         ctx = AttackContext(
             campaign_id=self._campaign.id,
             target_model=cfg.target.model,
@@ -116,8 +116,27 @@ class CampaignRunner:
             max_concurrency=cfg.max_workers,
         )
         results = await runner.run(ctx)
-        vuln = detector.analyze(self._campaign.id, plugin, results)
-        return results, vuln
+        vulnerability = detector.analyze(self._campaign.id, plugin, results)
+        return _PluginOutcome(results=results, vulnerability=vulnerability)
+
+    def _build_report(self, outcomes: list[_PluginOutcome]) -> Report:
+        """Aggregate outcomes and update campaign stats before building the report."""
+        vulnerabilities = [o.vulnerability for o in outcomes if o.vulnerability]
+        all_results = [r for o in outcomes for r in o.results]
+        total = len(all_results)
+        successes = sum(1 for r in all_results if r.vulnerability_detected)
+
+        self._campaign.status = CampaignStatus.COMPLETED
+        self._campaign.completed_at = datetime.now(UTC)
+        self._campaign.total_attacks = total
+        self._campaign.successful_attacks = successes
+        self._campaign.vulnerabilities_found = len(vulnerabilities)
+
+        return Report(
+            campaign=self._campaign,
+            summary=_build_summary(total, successes, vulnerabilities),
+            vulnerabilities=vulnerabilities,
+        )
 
 
 def _build_summary(
@@ -127,14 +146,12 @@ def _build_summary(
 ) -> ReportSummary:
     by_severity: dict[str, int] = {s.value: 0 for s in Severity}
     by_category: dict[str, int] = {}
+    scores: list[float] = []
 
-    scores = []
     for v in vulnerabilities:
         by_severity[v.severity] = by_severity.get(v.severity, 0) + 1
         by_category[v.category] = by_category.get(v.category, 0) + 1
         scores.append(v.score.final)
-
-    overall = round(sum(scores) / len(scores), 2) if scores else 0.0
 
     return ReportSummary(
         total_attacks=total,
@@ -142,5 +159,5 @@ def _build_summary(
         success_rate=round(successes / total, 4) if total > 0 else 0.0,
         vulnerabilities_by_severity=by_severity,
         vulnerabilities_by_category=by_category,
-        overall_risk_score=overall,
+        overall_risk_score=round(sum(scores) / len(scores), 2) if scores else 0.0,
     )

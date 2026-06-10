@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from marlowe.core.models import Report
 
 
-def to_dict(report: Report) -> dict:
+def to_dict(report: Report) -> dict[str, Any]:
     return report.model_dump(mode="json")
 
 

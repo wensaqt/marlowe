@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from marlowe.cli.commands.scan import app as scan_app
+from marlowe.cli.commands.scan import scan
 
 app = typer.Typer(
     name="marlowe",
@@ -15,7 +15,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-app.add_typer(scan_app, name="scan", invoke_without_command=True)
+app.command("scan")(scan)
 
 
 @app.command("help")
@@ -98,9 +98,6 @@ def help_command() -> None:
 @app.command("plugins")
 def list_plugins() -> None:
     """List all registered attack plugins."""
-    from rich.console import Console
-    from rich.table import Table
-
     from marlowe.core.registry import PluginRegistry
 
     registry = PluginRegistry()
@@ -113,7 +110,7 @@ def list_plugins() -> None:
     table.add_column("Base Score")
     table.add_column("Tags")
 
-    for p in registry.all():
+    for p in registry.all_plugins():
         table.add_row(
             p.plugin_id,
             p.display_name,

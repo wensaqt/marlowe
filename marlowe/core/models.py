@@ -8,6 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
+from importlib.metadata import version
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -214,4 +215,4 @@ class Report(BaseModel):
     summary: ReportSummary
     vulnerabilities: list[Vulnerability]
     generated_at: datetime = Field(default_factory=_now)
-    marlowe_version: str = "0.1.0"
+    marlowe_version: str = Field(default_factory=lambda: version("marlowe"))

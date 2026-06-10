@@ -91,9 +91,8 @@ class BaselineProfiler:
             try:
                 resp = await self._adapter.send(probe)
                 sensitive_responses.append(resp)
-            except Exception:
-                # Sensitive probes failing is non-fatal
-                pass
+            except Exception as exc:
+                log.debug("sensitive probe failed (non-fatal)", probe=probe[:50], error=str(exc))
 
         profile = BaselineProfile(benign_responses, sensitive_responses)
         log.info("baseline complete", profile=str(profile))
@@ -101,11 +100,5 @@ class BaselineProfiler:
 
 
 def _looks_like_refusal(text: str) -> bool:
-    import re
-
-    pattern = re.compile(
-        r"(i (can'?t|cannot|won'?t|will not)|sorry|unable|against.*guideline"
-        r"|inappropriate|harmful|illegal)",
-        re.IGNORECASE,
-    )
-    return bool(pattern.search(text))
+    from marlowe.analysis.heuristics.refusal_bypass import contains_refusal
+    return contains_refusal(text)
