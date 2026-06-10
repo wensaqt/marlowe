@@ -1,10 +1,11 @@
 """Marlowe CLI entrypoint."""
 
+from typing import NamedTuple
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from marlowe.cli.commands.scan import app as scan_app
 
@@ -71,23 +72,27 @@ def help_command() -> None:
     console.print("\n[bold]scan options[/bold]")
     console.print(options)
 
-    # Examples
-    console.print("\n[bold]Examples[/bold]\n")
-    examples = [
-        ("Run all plugins against a local Ollama model",
-         "marlowe scan -t http://localhost:11434 -m llama3"),
-        ("Test only the direct_override plugin",
-         "marlowe scan -t http://localhost:11434 -m mistral -p direct_override"),
-        ("Inject a custom system prompt and save report",
-         'marlowe scan -t http://localhost:11434 -m llama3 \\\n'
-         '  -s "You are a customer support agent." \\\n'
-         '  -o reports/my_scan.json'),
-        ("Increase attack surface (more variants, more workers)",
-         "marlowe scan -t http://localhost:11434 -m llama3 -v 20 -w 10"),
+    class _Example(NamedTuple):
+        description: str
+        command: str
+
+    examples: list[_Example] = [
+        _Example("Run all plugins against a local Ollama model",
+                 "marlowe scan -t http://localhost:11434 -m llama3"),
+        _Example("Test only the direct_override plugin",
+                 "marlowe scan -t http://localhost:11434 -m mistral -p direct_override"),
+        _Example("Inject a custom system prompt and save report",
+                 'marlowe scan -t http://localhost:11434 -m llama3 \\\n'
+                 '  -s "You are a customer support agent." \\\n'
+                 '  -o reports/my_scan.json'),
+        _Example("Increase attack surface (more variants, more workers)",
+                 "marlowe scan -t http://localhost:11434 -m llama3 -v 20 -w 10"),
     ]
-    for desc, cmd in examples:
-        console.print(f"  [dim]{desc}[/dim]")
-        console.print(f"  [green]$ {cmd}[/green]\n")
+
+    console.print("\n[bold]Examples[/bold]\n")
+    for example in examples:
+        console.print(f"  [dim]{example.description}[/dim]")
+        console.print(f"  [green]$ {example.command}[/green]\n")
 
 
 @app.command("plugins")
