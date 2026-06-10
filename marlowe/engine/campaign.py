@@ -12,7 +12,7 @@ Flow:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 
@@ -89,7 +89,7 @@ class CampaignRunner:
 
         # 5. Build report
         self._campaign.status = CampaignStatus.COMPLETED
-        self._campaign.completed_at = datetime.now(timezone.utc)
+        self._campaign.completed_at = datetime.now(UTC)
         self._campaign.total_attacks = total_attacks
         self._campaign.successful_attacks = total_successes
         self._campaign.vulnerabilities_found = len(vulnerabilities)
