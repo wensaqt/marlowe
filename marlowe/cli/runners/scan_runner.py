@@ -32,6 +32,10 @@ class ScanRunner:
         """Build, run, and persist reports. Returns the completed Report."""
         return asyncio.run(self._execute_async())
 
+    async def execute_async(self) -> Report:
+        """Async version of execute() — use this when already inside an event loop."""
+        return await self._execute_async()
+
     async def _execute_async(self) -> Report:
         registry = self._build_registry()
         campaign = Campaign(name=self._campaign_name, config=self._config)
