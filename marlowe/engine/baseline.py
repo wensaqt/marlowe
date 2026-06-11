@@ -12,6 +12,7 @@ import statistics
 
 import structlog
 
+from marlowe.analysis.heuristics.refusal_bypass import contains_refusal
 from marlowe.core.exceptions import BaselineError
 from marlowe.core.models import TargetResponse
 from marlowe.targets.base import BaseTargetAdapter
@@ -100,5 +101,4 @@ class BaselineProfiler:
 
 
 def _looks_like_refusal(text: str) -> bool:
-    from marlowe.analysis.heuristics.refusal_bypass import contains_refusal
     return contains_refusal(text)

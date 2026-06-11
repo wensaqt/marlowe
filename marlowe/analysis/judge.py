@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import NamedTuple
+from typing import NamedTuple, Protocol, runtime_checkable
 
 import structlog
 
@@ -69,6 +69,19 @@ class JudgeVerdict(NamedTuple):
     shifted: bool
     confidence: float
     reason: str
+
+
+# ---------------------------------------------------------------------------
+# Protocol — allows type-safe injection of any judge backend
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class Judge(Protocol):
+    @property
+    def is_usable(self) -> bool: ...
+
+    async def evaluate(self, result: AttackResult) -> JudgeVerdict: ...
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +198,7 @@ def create_judge(
     backend: JudgeBackend,
     adapter: BaseTargetAdapter,
     system_prompt: str | None,
-) -> OllamaJudge | ClaudeJudge | None:
+) -> Judge | None:
     """Return the appropriate judge for the given backend, or None to disable."""
     if backend == JudgeBackend.NONE:
         return None

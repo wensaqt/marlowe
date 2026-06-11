@@ -7,13 +7,13 @@ Severity thresholds mirror CVSS v3.1 ranges.
 
 from __future__ import annotations
 
-from marlowe.core.constants import IMPACT_MULTIPLIERS, SEVERITY_THRESHOLDS
+from marlowe.core.constants import IMPACT_MULTIPLIERS, SEVERITY_THRESHOLDS, ImpactCategory
 from marlowe.core.models import AttackResult, CVSSScore, Severity
 
 
 def compute_score(
     plugin_base_score: float,
-    impact_category: str,
+    impact_category: ImpactCategory,
     results: list[AttackResult],
 ) -> CVSSScore:
     total = len(results)

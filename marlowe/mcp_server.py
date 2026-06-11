@@ -149,7 +149,9 @@ def marlowe_get_report(filename: str) -> str:
     Returns:
         The full report content as a string.
     """
-    path = _REPORTS_DIR / filename
+    path = (_REPORTS_DIR / filename).resolve()
+    if not path.is_relative_to(_REPORTS_DIR.resolve()):
+        return "Access denied: filename must not escape the reports directory."
     if not path.exists():
         available = [f.name for f in sorted(_REPORTS_DIR.glob("*")) if f.is_file()]
         return (
