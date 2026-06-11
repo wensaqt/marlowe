@@ -1,144 +1,182 @@
 # Marlowe
 
-**Automated red-teaming agent for LLM prompt injection testing.**
+**Automated red-teaming tool for LLM prompt injection testing.**
 
-Marlowe probes a target LLM with a battery of adversarial prompt injection techniques, analyzes responses for vulnerabilities, and produces a structured security report.
+Marlowe runs adversarial attack campaigns against a target LLM, evaluates responses with an LLM-as-Judge, and produces a structured security report.
 
 ```
-$ marlowe scan --target http://localhost:11434 --model llama3
+$ marlowe scan -t http://localhost:11434 -m mistral -S prompt_system/medical_triage.txt
 
 ╭─────────────────────────────────────────────╮
 │ Marlowe — Automated LLM Red-Team Agent      │
 ╰─────────────────────────────────────────────╯
-┌─────────────────────────────────────────────────────────────────┐
-│ Attacks: 120  Successes: 34  Success rate: 28.3%  Risk: 7.4/10 │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ Attacks: 30  Successes: 12  Success rate: 40.0%  Risk score: 7.4/10 │
+└──────────────────────────────────────────────────────────────────────┘
  Plugin            Severity   Score  Evidence
- direct_override   HIGH       7.4    "MARLOWE_PWNED"
+ direct_override   HIGH       7.4    "...MARLOWE_PWNED..."
+ many_shot         MEDIUM     5.2    "...MARLOWE_PWNED..."
 ```
 
 ## What it tests
 
-Marlowe implements a plugin-based attack engine covering the [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/):
+Marlowe implements a plugin-based attack engine covering [OWASP LLM01](https://owasp.org/www-project-top-10-for-large-language-model-applications/):
 
 | Plugin | Technique | OWASP |
 |---|---|---|
-| `direct_override` | "Ignore all previous instructions" + 12 variants | LLM01 |
-| `roleplay_dan` | DAN 6.0–13.0, AIM, STAN, JAILBREAK personas | LLM01 |
-| `many_shot` | N-shot conditioning (5 / 15 / 50 / 100 examples) | LLM01 |
-| `obfuscation` | Base64, ROT13, leetspeak, unicode homoglyphs | LLM01 |
-| `completion_trap` | Autoregressive completion exploitation | LLM01 |
-| `context_switch` | Context smuggling via translation/summarisation tasks | LLM01 |
-| `system_prompt_extraction` | System prompt inference via refusal analysis | LLM07 |
-| `indirect_rag` | Malicious instructions embedded in RAG documents | LLM02 |
-| `multi_turn_conditioning` | Gradual trust-building over multiple turns | LLM01 |
-| `adversarial_suffix` | Token-level greedy suffix search (Zou et al. 2023) | LLM01 |
+| `direct_override` | "Ignore all previous instructions" — 12 variants | LLM01 |
+| `many_shot` | N-shot compliance conditioning (5 / 10 / 20 examples) — 12 variants | LLM01 |
+| `obfuscation` | Base64, ROT13, leetspeak, homoglyphs, morse, hex, reversed — 12 variants | LLM01 |
 
 Each finding is scored with a **CVSS-inspired metric** (0–10) and mapped to a severity level (Critical / High / Medium / Low / Info).
+
+## Detection pipeline
+
+For each attack result, Marlowe runs three detection layers in sequence:
+
+1. **Plugin marker** — deterministic probe (`MARLOWE_PWNED`) that the model must echo to confirm a bypass
+2. **LLM-as-Judge** — a second model evaluates the response for role deviation (`SHIFTED` / `NORMAL`). Includes an `on_topic` pre-filter that skips the full evaluation when the model clearly ignored the injection
+3. **Refusal bypass** — cross-checks whether a model that normally refuses sensitive requests stopped refusing under attack
 
 ## Quickstart
 
 **Requirements:** Python 3.11+, [Ollama](https://ollama.com) running locally.
 
 ```bash
-# Install
 git clone https://github.com/wensaqt/marlowe
 cd marlowe
 pip install -e .
 
-# Pull a model
-ollama pull llama3
+ollama pull mistral
 
-# Run a scan
-marlowe scan --target http://localhost:11434 --model llama3
-```
-
-Or with Docker:
-
-```bash
-docker compose -f docker/docker-compose.yml up
+marlowe scan -t http://localhost:11434 -m mistral
 ```
 
 ## Usage
 
-```
-marlowe scan    Run a red-team campaign against a target LLM
-marlowe plugins List all registered attack plugins
-marlowe help    Show usage guide and examples
-```
-
 ```bash
-# Test a specific plugin
-marlowe scan -t http://localhost:11434 -m llama3 -p direct_override
+# Scan with a system prompt file
+marlowe scan -t http://localhost:11434 -m mistral \
+  -S prompt_system/medical_triage.txt
 
-# Test with a custom system prompt
-marlowe scan -t http://localhost:11434 -m llama3 \
-  -s "You are a customer support agent for Acme Corp." \
-  -o reports/acme_scan.json
+# Inline system prompt
+marlowe scan -t http://localhost:11434 -m mistral \
+  -s "You are a customer support agent for Acme Corp."
 
-# More attack variants, higher concurrency
+# Run specific plugins only
+marlowe scan -t http://localhost:11434 -m mistral \
+  -p direct_override -p obfuscation
+
+# Use Claude as the judge (requires ANTHROPIC_API_KEY)
+pip install marlowe[claude]
+marlowe scan -t http://localhost:11434 -m mistral \
+  -S prompt_system/medical_triage.txt --judge claude
+
+# Disable the judge (plugin marker + refusal bypass only)
+marlowe scan -t http://localhost:11434 -m mistral --judge none
+
+# More variants, higher concurrency
 marlowe scan -t http://localhost:11434 -m mistral -v 20 -w 10
 ```
+
+### All flags
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--target` | `-t` | — | Target URL (e.g. `http://localhost:11434`) |
+| `--model` | `-m` | — | Model name (e.g. `mistral`, `llama3`) |
+| `--system-prompt` | `-s` | — | System prompt as inline string |
+| `--system-prompt-file` | `-S` | — | System prompt from a `.md` or `.txt` file |
+| `--plugin` | `-p` | all | Plugin IDs to run (repeatable) |
+| `--judge` | `-j` | `ollama` | Judge backend: `ollama` / `claude` / `none` |
+| `--variants` | `-v` | `10` | Prompt variants per plugin |
+| `--workers` | `-w` | `5` | Max concurrent requests |
+| `--output` | `-o` | auto | Report path (default: `reports/`) |
+| `--name` | `-n` | `marlowe-scan` | Campaign name |
+
+## Claude Code integration (MCP)
+
+Marlowe exposes a [Model Context Protocol](https://modelcontextprotocol.io) server so you can run scans directly from Claude Code.
+
+```bash
+pip install marlowe[mcp]
+claude mcp add marlowe /path/to/marlowe/.venv/bin/marlowe-mcp
+```
+
+Then ask Claude: *"Run a Marlowe scan against http://localhost:11434 with mistral using the medical triage system prompt"* — Claude calls `marlowe_scan`, reads the report, and acts as the judge.
+
+Available MCP tools: `marlowe_scan`, `marlowe_list_plugins`, `marlowe_get_report`.
+
+## Sample system prompts
+
+The `prompt_system/` directory contains ready-to-use system prompts for testing:
+
+| File | Scenario |
+|---|---|
+| `medical_triage.txt` | Medical triage assistant |
+| `customer_support.md` | Customer support agent |
+| `coding_assistant.md` | Code review assistant |
+| `finance_advisor.md` | Financial advisor |
 
 ## Architecture
 
 ```
 marlowe/
 ├── core/        Domain models · exceptions · plugin registry
-├── targets/     Adapters for Ollama, OpenAI-compatible APIs, LangChain
+├── targets/     Ollama adapter (OpenAI-compatible)
 ├── attacks/     Plugin base class + attack plugins
 ├── engine/      Campaign orchestrator · async runner · baseline profiler
-├── analysis/    Vulnerability detector · CVSS scorer · heuristics
-└── reporting/   JSON / Markdown / HTML report generators
+├── analysis/    Vulnerability detector · LLM judge · CVSS scorer · heuristics
+└── reporting/   JSON + Markdown report generators
 ```
 
-Plugins are discovered via Python entry points — adding a new attack requires only inheriting `BaseAttackPlugin` and registering in `pyproject.toml`. No changes to core code.
-
-## Extending Marlowe
+## Writing a plugin
 
 ```python
-from marlowe.attacks.base import BaseAttackPlugin, AttackContext
+from marlowe.attacks.base import AnalysisResult, AttackContext, BaseAttackPlugin
+from marlowe.core.constants import ImpactCategory
 from marlowe.core.models import AttackPrompt, OWASPCategory, TargetResponse
 
 class MyPlugin(BaseAttackPlugin):
-    plugin_id = "my_attack"
-    display_name = "My Custom Attack"
-    category = OWASPCategory.LLM01_PROMPT_INJECTION
-    base_score = 6.0
-    impact_category = "instruction_bypass"
-    tags = ["custom"]
+    plugin_id      = "my_attack"
+    display_name   = "My Custom Attack"
+    description    = "What this attack does."
+    category       = OWASPCategory.LLM01_PROMPT_INJECTION
+    base_score     = 6.0
+    impact_category = ImpactCategory.INSTRUCTION_BYPASS
+    tags           = ("custom",)
 
     async def generate_variants(self, ctx: AttackContext) -> list[AttackPrompt]:
-        ...
+        return [AttackPrompt(
+            plugin_id=self.plugin_id,
+            variant_name="v1",
+            content="my injected prompt",
+        )]
 
-    def analyze_response(self, response, prompt, ctx) -> tuple[bool, float, str | None]:
-        ...
+    def analyze_response(
+        self, response: TargetResponse, prompt: AttackPrompt, ctx: AttackContext
+    ) -> AnalysisResult:
+        success = "MARKER" in response.content
+        return AnalysisResult(success=success, confidence=0.95 if success else 0.0, evidence=None)
 ```
 
-Then register in `pyproject.toml`:
+Register in `pyproject.toml`:
+
 ```toml
 [project.entry-points."marlowe.attacks"]
 my_attack = "my_package.my_plugin:MyPlugin"
 ```
 
-## Supported targets
-
-| Target | Adapter |
-|---|---|
-| Ollama (local) | `OllamaAdapter` |
-| OpenAI / Groq / Together AI / LM Studio | `OpenAIAdapter` *(coming soon)* |
-| Any LangChain `BaseChatModel` | `LangChainAdapter` *(coming soon)* |
-
 ## Report output
 
-Marlowe generates a JSON report by default:
+Marlowe saves a JSON report and an AI-written Markdown analysis under `reports/`.
 
 ```json
 {
-  "campaign": { "name": "...", "status": "completed" },
   "summary": {
-    "total_attacks": 120,
-    "successful_attacks": 34,
+    "total_attacks": 30,
+    "successful_attacks": 12,
+    "success_rate": 0.4,
     "overall_risk_score": 7.4
   },
   "vulnerabilities": [
@@ -146,8 +184,8 @@ Marlowe generates a JSON report by default:
       "plugin_id": "direct_override",
       "severity": "high",
       "score": { "final": 7.4 },
-      "evidence": ["MARLOWE_PWNED"],
-      "remediation": "Implement input validation..."
+      "evidence": ["...MARLOWE_PWNED..."],
+      "remediation": "Implement input validation and sanitisation..."
     }
   ]
 }
@@ -156,8 +194,8 @@ Marlowe generates a JSON report by default:
 ## References
 
 - [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
-- [Universal and Transferable Adversarial Attacks on Aligned Language Models](https://arxiv.org/abs/2307.15043) — Zou et al. 2023
-- [Prompt Injection Attacks and Defenses in LLM-Integrated Applications](https://arxiv.org/abs/2310.12815)
+- [Many-shot Jailbreaking — Anthropic (2024)](https://www.anthropic.com/research/many-shot-jailbreaking)
+- [Universal and Transferable Adversarial Attacks on Aligned Language Models — Zou et al. 2023](https://arxiv.org/abs/2307.15043)
 
 ## License
 
