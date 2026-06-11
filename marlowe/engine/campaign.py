@@ -70,7 +70,8 @@ class CampaignRunner:
         detector = VulnerabilityDetector(profile)
 
         outcomes = await self._run_all_plugins(plugins, profile, detector, cfg)
-        return self._build_report(outcomes)
+        self._complete_campaign(outcomes)
+        return _build_report(self._campaign, outcomes)
 
     def _resolve_plugins(self, cfg: CampaignConfig) -> list[BaseAttackPlugin]:
         """Return the plugins selected by the campaign config (all if none specified)."""
@@ -119,24 +120,31 @@ class CampaignRunner:
         vulnerability = detector.analyze(self._campaign.id, plugin, results)
         return _PluginOutcome(results=results, vulnerability=vulnerability)
 
-    def _build_report(self, outcomes: list[_PluginOutcome]) -> Report:
-        """Aggregate outcomes and update campaign stats before building the report."""
-        vulnerabilities = [o.vulnerability for o in outcomes if o.vulnerability]
+    def _complete_campaign(self, outcomes: list[_PluginOutcome]) -> None:
+        """Mark the campaign as completed and update its aggregate statistics."""
         all_results = [r for o in outcomes for r in o.results]
-        total = len(all_results)
-        successes = sum(1 for r in all_results if r.vulnerability_detected)
+        vulnerabilities = [o.vulnerability for o in outcomes if o.vulnerability]
 
         self._campaign.status = CampaignStatus.COMPLETED
         self._campaign.completed_at = datetime.now(UTC)
-        self._campaign.total_attacks = total
-        self._campaign.successful_attacks = successes
+        self._campaign.total_attacks = len(all_results)
+        self._campaign.successful_attacks = sum(1 for r in all_results if r.vulnerability_detected)
         self._campaign.vulnerabilities_found = len(vulnerabilities)
 
-        return Report(
-            campaign=self._campaign,
-            summary=_build_summary(total, successes, vulnerabilities),
+
+def _build_report(campaign: Campaign, outcomes: list[_PluginOutcome]) -> Report:
+    """Build a Report from a completed campaign and its plugin outcomes."""
+    vulnerabilities = [o.vulnerability for o in outcomes if o.vulnerability]
+    all_results = [r for o in outcomes for r in o.results]
+    return Report(
+        campaign=campaign,
+        summary=_build_summary(
+            total=len(all_results),
+            successes=sum(1 for r in all_results if r.vulnerability_detected),
             vulnerabilities=vulnerabilities,
-        )
+        ),
+        vulnerabilities=vulnerabilities,
+    )
 
 
 def _build_summary(

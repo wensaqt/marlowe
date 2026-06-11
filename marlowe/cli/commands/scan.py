@@ -10,12 +10,16 @@ import typer
 
 from marlowe.cli import output
 from marlowe.cli.runners.scan_runner import ScanRunner
-from marlowe.core.exceptions import PluginNotFoundError, TargetUnreachableError
+from marlowe.core.exceptions import ConfigurationError, PluginNotFoundError, TargetUnreachableError
 from marlowe.core.models import CampaignConfig, TargetConfig
 
 app = typer.Typer()
 
 _REPORTS_DIR = Path(__file__).parents[3] / "reports"
+
+# Security constraints for system prompt files
+_ALLOWED_EXTENSIONS: frozenset[str] = frozenset({".md", ".txt"})
+_MAX_SYSTEM_PROMPT_BYTES: int = 32_768  # 32 KB — well above any reasonable system prompt
 
 
 def _generate_report_path(model: str, name: str, plugins: list[str]) -> Path:
@@ -34,6 +38,47 @@ def _generate_report_path(model: str, name: str, plugins: list[str]) -> Path:
     return _REPORTS_DIR / filename
 
 
+def _load_system_prompt_file(path: Path) -> str:
+    """
+    Read a system prompt from a .md or .txt file with security validation.
+
+    Raises ConfigurationError on any violation so the caller gets a clear message.
+    """
+    # Resolve symlinks before any check to prevent symlink attacks
+    try:
+        resolved = path.resolve(strict=True)
+    except (FileNotFoundError, OSError) as exc:
+        raise ConfigurationError(f"System prompt file not found: {path}") from exc
+
+    if not resolved.is_file():
+        raise ConfigurationError(f"System prompt path is not a file: {path}")
+
+    if resolved.suffix.lower() not in _ALLOWED_EXTENSIONS:
+        raise ConfigurationError(
+            f"Unsupported file type '{resolved.suffix}'. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_EXTENSIONS))}"
+        )
+
+    size = resolved.stat().st_size
+    if size > _MAX_SYSTEM_PROMPT_BYTES:
+        raise ConfigurationError(
+            f"System prompt file is too large ({size:,} bytes). "
+            f"Maximum allowed: {_MAX_SYSTEM_PROMPT_BYTES:,} bytes (32 KB)."
+        )
+
+    try:
+        content = resolved.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError(
+            f"System prompt file is not valid UTF-8: {path}"
+        ) from exc
+
+    if not content.strip():
+        raise ConfigurationError(f"System prompt file is empty: {path}")
+
+    return content
+
+
 class ScanCommand:
     """
     Defines the scan command: holds validated CLI arguments and delegates
@@ -45,20 +90,39 @@ class ScanCommand:
         url: str,
         model: str,
         system_prompt: str | None,
+        system_prompt_file: Path | None,
         plugins: list[str],
         workers: int,
         variants: int,
         output_path: Path | None,
         name: str,
     ) -> None:
+        resolved_prompt = self._resolve_system_prompt(system_prompt, system_prompt_file)
         self.config = CampaignConfig(
-            target=TargetConfig(url=url, model=model, system_prompt=system_prompt),
+            target=TargetConfig(url=url, model=model, system_prompt=resolved_prompt),
             plugins=plugins,
             max_workers=workers,
             variants_per_plugin=variants,
         )
         self.name = name
         self.output_path = output_path or _generate_report_path(model, name, plugins)
+
+    @staticmethod
+    def _resolve_system_prompt(
+        inline: str | None,
+        file: Path | None,
+    ) -> str | None:
+        """
+        Return the system prompt from either the inline string or the file.
+        Raises ConfigurationError if both are provided simultaneously.
+        """
+        if inline and file:
+            raise ConfigurationError(
+                "Provide either --system-prompt or --system-prompt-file, not both."
+            )
+        if file:
+            return _load_system_prompt_file(file)
+        return inline
 
     def run(self) -> None:
         output.print_banner()
@@ -76,10 +140,7 @@ class ScanCommand:
         try:
             with output.console.status("[bold green]Running campaign...[/bold green]"):
                 report = runner.execute()
-        except TargetUnreachableError as e:
-            output.print_error(str(e))
-            raise typer.Exit(1) from e
-        except PluginNotFoundError as e:
+        except (TargetUnreachableError, PluginNotFoundError, ConfigurationError) as e:
             output.print_error(str(e))
             raise typer.Exit(1) from e
 
@@ -90,14 +151,15 @@ class ScanCommand:
 
 @app.command()
 def scan(
-    url:           Annotated[str,         typer.Option("--target",        "-t", help="Target URL (e.g. http://localhost:11434)")],
-    model:         Annotated[str,         typer.Option("--model",         "-m", help="Model name (e.g. llama3)")],
-    system_prompt: Annotated[str | None,  typer.Option("--system-prompt", "-s", help="System prompt injected before attacks")] = None,
-    plugins:       Annotated[list[str],   typer.Option("--plugin",        "-p", help="Plugin IDs to run (default: all, repeatable)")] = [],
-    workers:       Annotated[int,         typer.Option("--workers",       "-w", help="Max concurrent requests")] = 5,
-    variants:      Annotated[int,         typer.Option("--variants",      "-v", help="Prompt variants per plugin")] = 10,
-    output_path:   Annotated[Path | None, typer.Option("--output",        "-o", help=f"Report path (default: ~/.marlowe/reports/)")] = None,
-    name:          Annotated[str,         typer.Option("--name",          "-n", help="Campaign name")] = "marlowe-scan",
+    url:                 Annotated[str,         typer.Option("--target",              "-t", help="Target URL (e.g. http://localhost:11434)")],
+    model:               Annotated[str,         typer.Option("--model",               "-m", help="Model name (e.g. llama3)")],
+    system_prompt:       Annotated[str | None,  typer.Option("--system-prompt",       "-s", help="System prompt as inline string")] = None,
+    system_prompt_file:  Annotated[Path | None, typer.Option("--system-prompt-file",  "-S", help="System prompt from a .md or .txt file")] = None,
+    plugins:             Annotated[list[str],   typer.Option("--plugin",              "-p", help="Plugin IDs to run (default: all, repeatable)")] = [],
+    workers:             Annotated[int,         typer.Option("--workers",             "-w", help="Max concurrent requests")] = 5,
+    variants:            Annotated[int,         typer.Option("--variants",            "-v", help="Prompt variants per plugin")] = 10,
+    output_path:         Annotated[Path | None, typer.Option("--output",              "-o", help="Report path (default: marlowe/reports/)")] = None,
+    name:                Annotated[str,         typer.Option("--name",                "-n", help="Campaign name")] = "marlowe-scan",
 ) -> None:
     """Run a prompt injection red-team campaign against a target LLM."""
-    ScanCommand(url, model, system_prompt, plugins, workers, variants, output_path, name).run()
+    ScanCommand(url, model, system_prompt, system_prompt_file, plugins, workers, variants, output_path, name).run()
