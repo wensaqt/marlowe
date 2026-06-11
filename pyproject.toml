@@ -45,7 +45,9 @@ marlowe     = "marlowe.cli.app:app"
 marlowe-mcp = "marlowe.mcp_server:run"
 
 [project.entry-points."marlowe.attacks"]
-direct_override    = "marlowe.attacks.plugins.direct_override:DirectOverridePlugin"
+direct_override = "marlowe.attacks.plugins.direct_override:DirectOverridePlugin"
+many_shot       = "marlowe.attacks.plugins.many_shot:ManyShotPlugin"
+obfuscation     = "marlowe.attacks.plugins.obfuscation:ObfuscationPlugin"
 
 [tool.ruff]
 target-version = "py311"
