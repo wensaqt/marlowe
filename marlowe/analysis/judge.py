@@ -171,6 +171,16 @@ class ClaudeJudge:
 # ---------------------------------------------------------------------------
 
 
+def validate_judge_backend(backend: JudgeBackend) -> None:
+    """
+    Eagerly validate that the requested judge backend is usable.
+    Raises ConfigurationError immediately so the CLI can fail before
+    the campaign starts — not halfway through baseline profiling.
+    """
+    if backend == JudgeBackend.CLAUDE:
+        ClaudeJudge._build_client()  # raises ConfigurationError if misconfigured
+
+
 def create_judge(
     backend: JudgeBackend,
     adapter: BaseTargetAdapter,

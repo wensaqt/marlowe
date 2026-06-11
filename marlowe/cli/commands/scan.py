@@ -10,6 +10,7 @@ import typer
 
 from marlowe.cli import output
 from marlowe.cli.runners.scan_runner import ScanRunner
+from marlowe.analysis.judge import validate_judge_backend
 from marlowe.core.exceptions import ConfigurationError, PluginNotFoundError, TargetUnreachableError
 from marlowe.core.models import CampaignConfig, JudgeBackend, TargetConfig
 
@@ -98,6 +99,7 @@ class ScanCommand:
         output_path: Path | None,
         name: str,
     ) -> None:
+        validate_judge_backend(judge)
         resolved_prompt = self._resolve_system_prompt(system_prompt, system_prompt_file)
         self.config = CampaignConfig(
             target=TargetConfig(url=url, model=model, system_prompt=resolved_prompt),
