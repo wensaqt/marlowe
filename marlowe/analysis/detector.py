@@ -145,6 +145,9 @@ class VulnerabilityDetector:
         for result in results:
             if result.response.is_error or not result.response.content:
                 continue
+            if not await self._judge.on_topic(result):
+                log.debug("on_topic filter skipped result", result_id=result.id)
+                continue
             verdict: JudgeVerdict = await self._judge.evaluate(result)
             if verdict.shifted and verdict.confidence >= _MIN_JUDGE_CONFIDENCE:
                 shifted.append(result)
