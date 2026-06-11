@@ -11,7 +11,7 @@ import typer
 from marlowe.cli import output
 from marlowe.cli.runners.scan_runner import ScanRunner
 from marlowe.core.exceptions import ConfigurationError, PluginNotFoundError, TargetUnreachableError
-from marlowe.core.models import CampaignConfig, TargetConfig
+from marlowe.core.models import CampaignConfig, JudgeBackend, TargetConfig
 
 app = typer.Typer()
 
@@ -94,6 +94,7 @@ class ScanCommand:
         plugins: list[str],
         workers: int,
         variants: int,
+        judge: JudgeBackend,
         output_path: Path | None,
         name: str,
     ) -> None:
@@ -103,6 +104,7 @@ class ScanCommand:
             plugins=plugins,
             max_workers=workers,
             variants_per_plugin=variants,
+            judge_backend=judge,
         )
         self.name = name
         self.output_path = output_path or _generate_report_path(model, name, plugins)
@@ -151,15 +153,16 @@ class ScanCommand:
 
 @app.command()
 def scan(
-    url:                 Annotated[str,         typer.Option("--target",              "-t", help="Target URL (e.g. http://localhost:11434)")],
-    model:               Annotated[str,         typer.Option("--model",               "-m", help="Model name (e.g. llama3)")],
-    system_prompt:       Annotated[str | None,  typer.Option("--system-prompt",       "-s", help="System prompt as inline string")] = None,
-    system_prompt_file:  Annotated[Path | None, typer.Option("--system-prompt-file",  "-S", help="System prompt from a .md or .txt file")] = None,
-    plugins:             Annotated[list[str],   typer.Option("--plugin",              "-p", help="Plugin IDs to run (default: all, repeatable)")] = [],
-    workers:             Annotated[int,         typer.Option("--workers",             "-w", help="Max concurrent requests")] = 5,
-    variants:            Annotated[int,         typer.Option("--variants",            "-v", help="Prompt variants per plugin")] = 10,
-    output_path:         Annotated[Path | None, typer.Option("--output",              "-o", help="Report path (default: marlowe/reports/)")] = None,
-    name:                Annotated[str,         typer.Option("--name",                "-n", help="Campaign name")] = "marlowe-scan",
+    url:                 Annotated[str,          typer.Option("--target",              "-t", help="Target URL (e.g. http://localhost:11434)")],
+    model:               Annotated[str,          typer.Option("--model",               "-m", help="Model name (e.g. llama3)")],
+    system_prompt:       Annotated[str | None,   typer.Option("--system-prompt",       "-s", help="System prompt as inline string")] = None,
+    system_prompt_file:  Annotated[Path | None,  typer.Option("--system-prompt-file",  "-S", help="System prompt from a .md or .txt file")] = None,
+    plugins:             Annotated[list[str],    typer.Option("--plugin",              "-p", help="Plugin IDs to run (default: all, repeatable)")] = [],
+    workers:             Annotated[int,          typer.Option("--workers",             "-w", help="Max concurrent requests")] = 5,
+    variants:            Annotated[int,          typer.Option("--variants",            "-v", help="Prompt variants per plugin")] = 10,
+    judge:               Annotated[JudgeBackend, typer.Option("--judge",               "-j", help="Judge backend: ollama | claude | none")] = JudgeBackend.OLLAMA,
+    output_path:         Annotated[Path | None,  typer.Option("--output",              "-o", help="Report path (default: marlowe/reports/)")] = None,
+    name:                Annotated[str,          typer.Option("--name",                "-n", help="Campaign name")] = "marlowe-scan",
 ) -> None:
     """Run a prompt injection red-team campaign against a target LLM."""
-    ScanCommand(url, model, system_prompt, system_prompt_file, plugins, workers, variants, output_path, name).run()
+    ScanCommand(url, model, system_prompt, system_prompt_file, plugins, workers, variants, judge, output_path, name).run()

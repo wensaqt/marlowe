@@ -54,6 +54,12 @@ class CampaignStatus(StrEnum):
     FAILED = "failed"
 
 
+class JudgeBackend(StrEnum):
+    OLLAMA = "ollama"   # same local adapter as the target
+    CLAUDE = "claude"   # Anthropic API (requires anthropic package + ANTHROPIC_API_KEY)
+    NONE   = "none"     # disable judge — Layer 1 + refusal bypass only
+
+
 # ---------------------------------------------------------------------------
 # Target
 # ---------------------------------------------------------------------------
@@ -177,6 +183,7 @@ class CampaignConfig(BaseModel):
     max_workers: int = 5
     variants_per_plugin: int = 10
     baseline_prompts: int = 5
+    judge_backend: JudgeBackend = JudgeBackend.OLLAMA
 
 
 class Campaign(BaseModel):

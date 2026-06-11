@@ -26,6 +26,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+claude = [
+    "anthropic>=0.28.0",
+]
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",

@@ -18,7 +18,7 @@ from typing import NamedTuple
 import structlog
 
 from marlowe.analysis.detector import VulnerabilityDetector
-from marlowe.analysis.judge import LLMJudge
+from marlowe.analysis.judge import create_judge
 from marlowe.attacks.base import AttackContext, BaseAttackPlugin
 from marlowe.core.exceptions import TargetUnreachableError
 from marlowe.core.models import (
@@ -68,7 +68,7 @@ class CampaignRunner:
 
         profile = await BaselineProfiler(self._adapter).run(n_benign=cfg.baseline_prompts)
         plugins = self._resolve_plugins(cfg)
-        judge = LLMJudge(self._adapter, cfg.target.system_prompt)
+        judge = create_judge(cfg.judge_backend, self._adapter, cfg.target.system_prompt)
         detector = VulnerabilityDetector(profile, judge)
 
         outcomes = await self._run_all_plugins(plugins, profile, detector, cfg)
