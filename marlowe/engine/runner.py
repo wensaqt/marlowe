@@ -18,7 +18,6 @@ import structlog
 
 from marlowe.attacks.base import AttackContext, BaseAttackPlugin
 from marlowe.core.models import AttackPrompt, AttackResult, AttackStatus, TargetResponse
-from marlowe.engine.baseline import BaselineProfile
 from marlowe.targets.base import BaseTargetAdapter
 
 log = structlog.get_logger(__name__)
@@ -29,12 +28,10 @@ class AttackRunner:
         self,
         adapter: BaseTargetAdapter,
         plugin: BaseAttackPlugin,
-        profile: BaselineProfile,
         max_concurrency: int = 3,
     ) -> None:
         self._adapter = adapter
         self._plugin = plugin
-        self._profile = profile
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
     async def run(self, ctx: AttackContext) -> list[AttackResult]:
@@ -54,12 +51,19 @@ class AttackRunner:
                     variant=variant.variant_name,
                     error=str(result),
                 )
-                attack_results.append(_error_result(ctx.campaign_id, self._plugin.plugin_id, variant, result))
+                attack_results.append(
+                    _error_result(ctx.campaign_id, self._plugin.plugin_id, variant, result)
+                )
             else:
                 attack_results.append(result)
 
         successes = sum(1 for r in attack_results if r.vulnerability_detected)
-        log.info("plugin complete", plugin=self._plugin.plugin_id, successes=successes, total=len(attack_results))
+        log.info(
+            "plugin complete",
+            plugin=self._plugin.plugin_id,
+            successes=successes,
+            total=len(attack_results),
+        )
         return attack_results
 
     async def _run_variant(self, ctx: AttackContext, variant: AttackPrompt) -> AttackResult:

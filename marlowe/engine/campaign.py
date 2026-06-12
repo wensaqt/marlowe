@@ -115,7 +115,6 @@ class CampaignRunner:
         runner = AttackRunner(
             adapter=self._adapter,
             plugin=plugin,
-            profile=profile,
             max_concurrency=cfg.max_workers,
         )
         results = await runner.run(ctx)
